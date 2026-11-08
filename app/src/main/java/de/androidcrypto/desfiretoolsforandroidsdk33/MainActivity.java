@@ -1229,11 +1229,18 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 
 	private boolean isConnected() {
 		MifareTag tag = this.tag;
-		
+
 		if(tag != null) {
-			DefaultIsoDepWrapper wrapper = (DefaultIsoDepWrapper) tag.getIo().getIsoDepWrapper();
-			
-			return wrapper.getIsoDep().isConnected();
+			try {
+				DefaultIsoDepWrapper wrapper = (DefaultIsoDepWrapper) tag.getIo().getIsoDepWrapper();
+
+				return wrapper.getIsoDep().isConnected();
+			} catch (Exception e) {
+				// Tag went out of date / was reset (common on MIUI): treat as disconnected
+				// instead of letting SecurityException crash the TagPresenceScanner.
+				Log.d(TAG, "Tag is out of date or disconnected", e);
+				return false;
+			}
 		}
 		return false;
 	}
