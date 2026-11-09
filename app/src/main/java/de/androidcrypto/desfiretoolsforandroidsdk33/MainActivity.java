@@ -105,6 +105,9 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 	// Dictionary attack
 	private static final int REQ_PICK_DIC = 0xD1C;
 	private java.util.List<byte[]> dictKeys;
+
+	// Armed action: runs now if a card is present, otherwise fires on next tag
+	private volatile Runnable pendingTagAction;
 	
 	protected AlertDialog alertDialog;
 	
@@ -181,6 +184,18 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 			tag = mifare_desfire_tag_new();
 			tag.setActive(1);
 			tag.setIo(defaultIsoDepAdapter);
+
+			// Fire any armed action now that the tag is connected, then stop (skip enumeration).
+			Runnable pending = pendingTagAction;
+			if (pending != null) {
+				pendingTagAction = null;
+				try {
+					pending.run();
+				} catch (Exception e) {
+					Log.d(TAG, "pending action failed", e);
+				}
+				return;
+			}
 
 			desfireTag = new DesfireTag();
 			
@@ -466,18 +481,19 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 		dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {
-				String script = input.getText().toString();
+				final String script = input.getText().toString();
 				dialog.dismiss();
-				runScript(script);
+				armOrRun(new Runnable() {
+					@Override
+					public void run() {
+						runScript(script);
+					}
+				});
 			}
 		});
 	}
 
 	private void runScript(final String script) {
-		if (!isConnected()) {
-			Toast.makeText(this, "Pose une carte sur le téléphone d'abord", Toast.LENGTH_SHORT).show();
-			return;
-		}
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
@@ -666,6 +682,16 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 		return s.toString();
 	}
 
+	// Run op now if a card is already present, otherwise arm it to fire when one is tapped.
+	private void armOrRun(final Runnable op) {
+		if (isConnected()) {
+			op.run();
+		} else {
+			pendingTagAction = op;
+			Toast.makeText(this, "Pose la carte sur le telephone pour lancer...", Toast.LENGTH_LONG).show();
+		}
+	}
+
 	// ----- Dictionary attack -----
 
 	private void pickDictionaryFile() {
@@ -760,19 +786,26 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 					Toast.makeText(MainActivity.this, "AID ou key number invalide", Toast.LENGTH_SHORT).show();
 					return;
 				}
-				if (!isConnected()) {
-					Toast.makeText(MainActivity.this, "Pose une carte sur le telephone d'abord", Toast.LENGTH_SHORT).show();
-					return;
-				}
 				dialog.dismiss();
-				runDictAttack(aid, (byte) keyNo);
+				armOrRun(new Runnable() {
+					@Override
+					public void run() {
+						runDictAttack(aid, (byte) keyNo);
+					}
+				});
 			}
 		});
 	}
 
 	private void runDictAttack(final byte[] aid, final byte keyNo) {
 		final java.util.List<byte[]> keys = dictKeys;
-		Toast.makeText(this, "Test de " + keys.size() + " cles...", Toast.LENGTH_SHORT).show();
+		final int ksize = keys.size();
+		runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				Toast.makeText(MainActivity.this, "Test de " + ksize + " cles...", Toast.LENGTH_SHORT).show();
+			}
+		});
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
@@ -868,18 +901,24 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 					Toast.makeText(MainActivity.this, "Parametres invalides", Toast.LENGTH_SHORT).show();
 					return;
 				}
-				if (!isConnected()) {
-					Toast.makeText(MainActivity.this, "Pose une carte sur le telephone d'abord", Toast.LENGTH_SHORT).show();
-					return;
-				}
 				dialog.dismiss();
-				runDumpRestore(aid, fileNo, (byte) keyNo, key);
+				armOrRun(new Runnable() {
+					@Override
+					public void run() {
+						runDumpRestore(aid, fileNo, (byte) keyNo, key);
+					}
+				});
 			}
 		});
 	}
 
 	private void runDumpRestore(final byte[] aid, final int fileNo, final byte changeKeyNo, final byte[] changeKey) {
-		Toast.makeText(this, "Dump + Restore en cours...", Toast.LENGTH_SHORT).show();
+		runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				Toast.makeText(MainActivity.this, "Dump + Restore en cours...", Toast.LENGTH_SHORT).show();
+			}
+		});
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
