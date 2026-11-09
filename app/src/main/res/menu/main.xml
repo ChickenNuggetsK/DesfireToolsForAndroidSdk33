@@ -14,6 +14,9 @@
         android:title="@string/fileSave"
           android:icon="@android:drawable/ic_menu_save"
         app:showAsAction="always" />
-     
-    
+    <item android:id="@+id/action_script"
+        android:title="Run Script"
+        app:showAsAction="never" />
+
+
 </menu>

@@ -440,9 +440,118 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 		setBackgroundColor(R.color.redWhite);
 	}
 
+	// ----- Script runner (raw APDU) -----
+
+	private void showScriptRunner() {
+		final android.widget.EditText input = new android.widget.EditText(this);
+		input.setHint("Une APDU par ligne, ex:\n90 6A 00 00 00");
+		input.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+		input.setMinLines(5);
+		input.setTypeface(android.graphics.Typeface.MONOSPACE);
+		input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+				| android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+				| android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+
+		AlertDialog.Builder builder = new AlertDialog.Builder(this);
+		builder.setTitle("Run Script");
+		builder.setView(input);
+		builder.setPositiveButton("Run", null);
+		builder.setNegativeButton("Cancel", null);
+		final AlertDialog dialog = builder.create();
+		dialog.show();
+		dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				String script = input.getText().toString();
+				dialog.dismiss();
+				runScript(script);
+			}
+		});
+	}
+
+	private void runScript(final String script) {
+		if (!isConnected()) {
+			Toast.makeText(this, "Pose une carte sur le téléphone d'abord", Toast.LENGTH_SHORT).show();
+			return;
+		}
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				final StringBuilder sb = new StringBuilder();
+				try {
+					DefaultIsoDepWrapper wrapper = (DefaultIsoDepWrapper) tag.getIo().getIsoDepWrapper();
+					String[] lines = script.split("\n");
+					for (String line : lines) {
+						String clean = line.replaceAll("[^0-9A-Fa-f]", "");
+						if (clean.length() == 0) {
+							continue;
+						}
+						if (clean.length() % 2 != 0) {
+							sb.append(">> ").append(line.trim()).append("\n");
+							sb.append("<< ERREUR: nombre impair de caracteres hex\n\n");
+							continue;
+						}
+						byte[] cmd = hexToBytes(clean);
+						try {
+							byte[] resp = wrapper.transceive(cmd);
+							sb.append(">> ").append(Utils.getHexString(cmd, true)).append("\n");
+							sb.append("<< ").append(Utils.getHexString(resp, true)).append("\n\n");
+						} catch (Exception e) {
+							sb.append(">> ").append(Utils.getHexString(cmd, true)).append("\n");
+							sb.append("<< ERREUR: ").append(e.getMessage()).append("\n\n");
+						}
+					}
+				} catch (Exception e) {
+					sb.append("ERREUR: ").append(e.getMessage()).append("\n");
+				}
+				runOnUiThread(new Runnable() {
+					@Override
+					public void run() {
+						showScriptResult(sb.toString());
+					}
+				});
+			}
+		}).start();
+	}
+
+	private void showScriptResult(String result) {
+		final android.widget.TextView tv = new android.widget.TextView(this);
+		tv.setText(result.length() == 0 ? "(aucune sortie)" : result);
+		tv.setTypeface(android.graphics.Typeface.MONOSPACE);
+		tv.setTextIsSelectable(true);
+		tv.setPadding(32, 24, 32, 24);
+		final android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+		scroll.addView(tv);
+
+		AlertDialog.Builder builder = new AlertDialog.Builder(this);
+		builder.setTitle("Resultat");
+		builder.setView(scroll);
+		builder.setPositiveButton("OK", null);
+		builder.setNeutralButton("Copier", new android.content.DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(android.content.DialogInterface d, int w) {
+				android.content.ClipboardManager cm =
+						(android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+				cm.setPrimaryClip(android.content.ClipData.newPlainText("script result", tv.getText()));
+				Toast.makeText(MainActivity.this, "Copie", Toast.LENGTH_SHORT).show();
+			}
+		});
+		builder.show();
+	}
+
+	private static byte[] hexToBytes(String s) {
+		int len = s.length();
+		byte[] data = new byte[len / 2];
+		for (int i = 0; i < len; i += 2) {
+			data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
+					+ Character.digit(s.charAt(i + 1), 16));
+		}
+		return data;
+	}
+
 	private void showMainFragment() {
 		Log.d(TAG, "showMainFragment");
-		
+
 		// Create new fragment and transaction
 		final MainFragment newFragment = new MainFragment();
 		
@@ -709,6 +818,9 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 			return true;
 		} else if (item.getItemId() == R.id.action_save) {
 			saveFileData();
+			return true;
+		} else if (item.getItemId() == R.id.action_script) {
+			showScriptRunner();
 			return true;
 		} else {
 			return super.onOptionsItemSelected(item);
