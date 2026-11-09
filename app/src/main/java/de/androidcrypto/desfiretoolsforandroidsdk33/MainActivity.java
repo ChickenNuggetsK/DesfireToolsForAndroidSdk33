@@ -639,6 +639,8 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 	}
 
 	private void showScriptResult(String result) {
+		// operation finished: let the phone sleep again
+		getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 		final android.widget.TextView tv = new android.widget.TextView(this);
 		tv.setText(result.length() == 0 ? "(aucune sortie)" : result);
 		tv.setTypeface(android.graphics.Typeface.MONOSPACE);
@@ -683,7 +685,10 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 	}
 
 	// Run op now if a card is already present, otherwise arm it to fire when one is tapped.
+	// Keep the screen on from here until the result is shown, so the phone does not sleep
+	// (NFC is disabled while the screen is off) during an armed wait or a long operation.
 	private void armOrRun(final Runnable op) {
+		getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 		if (isConnected()) {
 			op.run();
 		} else {
