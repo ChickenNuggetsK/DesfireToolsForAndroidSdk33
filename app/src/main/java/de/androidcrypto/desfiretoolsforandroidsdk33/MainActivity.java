@@ -108,6 +108,10 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 
 	// Armed action: runs now if a card is present, otherwise fires on next tag
 	private volatile Runnable pendingTagAction;
+
+	// Black-screen (AMOLED fake-sleep) mode
+	private android.view.View blackOverlay;
+	private boolean blackScreenEnabled;
 	
 	protected AlertDialog alertDialog;
 	
@@ -639,8 +643,10 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 	}
 
 	private void showScriptResult(String result) {
-		// operation finished: let the phone sleep again
-		getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+		// operation finished: let the phone sleep again (unless black-screen mode is holding it)
+		if (!blackScreenEnabled) {
+			getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+		}
 		final android.widget.TextView tv = new android.widget.TextView(this);
 		tv.setText(result.length() == 0 ? "(aucune sortie)" : result);
 		tv.setTypeface(android.graphics.Typeface.MONOSPACE);
@@ -695,6 +701,46 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 			pendingTagAction = op;
 			Toast.makeText(this, "Pose la carte sur le telephone pour lancer...", Toast.LENGTH_LONG).show();
 		}
+	}
+
+	// Optional AMOLED "fake sleep": full black overlay + minimum brightness, screen stays on
+	// (so NFC keeps working). Tap the screen to wake.
+	private void enterBlackScreen() {
+		if (blackScreenEnabled) {
+			return;
+		}
+		blackOverlay = new android.view.View(this);
+		blackOverlay.setBackgroundColor(android.graphics.Color.BLACK);
+		blackOverlay.setClickable(true);
+		blackOverlay.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				exitBlackScreen();
+			}
+		});
+		getWindow().addContentView(blackOverlay, new android.view.ViewGroup.LayoutParams(
+				android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+				android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+		android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+		lp.screenBrightness = 0f;
+		getWindow().setAttributes(lp);
+		getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+		blackScreenEnabled = true;
+		Toast.makeText(this, "Ecran noir — touche l'ecran pour reveiller. NFC reste actif.", Toast.LENGTH_LONG).show();
+	}
+
+	private void exitBlackScreen() {
+		if (!blackScreenEnabled) {
+			return;
+		}
+		if (blackOverlay != null && blackOverlay.getParent() instanceof android.view.ViewGroup) {
+			((android.view.ViewGroup) blackOverlay.getParent()).removeView(blackOverlay);
+		}
+		blackOverlay = null;
+		android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+		lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+		getWindow().setAttributes(lp);
+		blackScreenEnabled = false;
 	}
 
 	// ----- Dictionary attack -----
@@ -1255,6 +1301,10 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 		if(dump != null) {
 			dump.setVisible(true);
 		}
+		MenuItem black = menu.findItem(R.id.action_black);
+		if(black != null) {
+			black.setVisible(true);
+		}
 
 		MenuItem keys = menu.findItem(R.id.action_settings);
 		MenuItem addKey = menu.findItem(R.id.action_add);
@@ -1310,6 +1360,9 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 			return true;
 		} else if (item.getItemId() == R.id.action_dump) {
 			showDumpRestoreDialog();
+			return true;
+		} else if (item.getItemId() == R.id.action_black) {
+			enterBlackScreen();
 			return true;
 		} else {
 			return super.onOptionsItemSelected(item);

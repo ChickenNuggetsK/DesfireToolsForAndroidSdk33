@@ -23,6 +23,9 @@
     <item android:id="@+id/action_dump"
         android:title="Dump + Restore"
         app:showAsAction="never" />
+    <item android:id="@+id/action_black"
+        android:title="Ecran noir"
+        app:showAsAction="never" />
 
 
 </menu>
