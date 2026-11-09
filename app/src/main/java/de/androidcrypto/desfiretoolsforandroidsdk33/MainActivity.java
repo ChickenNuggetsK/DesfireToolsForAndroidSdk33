@@ -480,6 +480,11 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 				final StringBuilder sb = new StringBuilder();
 				try {
 					DefaultIsoDepWrapper wrapper = (DefaultIsoDepWrapper) tag.getIo().getIsoDepWrapper();
+					// nfcjlib high-level session (crypto auth etc.), bound to the live adapter
+					com.github.skjolber.desfire.nfcjlib.core.DESFireEV1 desfire =
+							new com.github.skjolber.desfire.nfcjlib.core.DESFireEV1();
+					desfire.setAdapter(defaultIsoDepAdapter);
+
 					String[] lines = script.split("\n");
 					for (String rawLine : lines) {
 						String line = rawLine;
@@ -492,17 +497,73 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 						if (dslash >= 0) {
 							line = line.substring(0, dslash);
 						}
-						String clean = line.replaceAll("\\s", "");
-						if (clean.length() == 0) {
+						String trimmed = line.trim();
+						if (trimmed.length() == 0) {
 							continue;
 						}
+						String upper = trimmed.toUpperCase();
+
+						// ----- High-level nfcjlib commands -----
+						if (upper.startsWith("SELECT")) {
+							try {
+								String aidHex = trimmed.substring(6).replaceAll("\\s", "");
+								byte[] aid = hexToBytes(aidHex);
+								boolean ok = desfire.selectApplication(aid);
+								sb.append(">> SELECT ").append(aidHex).append("\n");
+								sb.append("<< ").append(ok ? "OK" : "ECHEC (AID introuvable ?)").append("\n\n");
+							} catch (Exception e) {
+								sb.append(">> ").append(trimmed).append("\n<< ERREUR: ").append(e.getMessage())
+										.append(" (format: SELECT <aid 3 octets, LSB first>)\n\n");
+							}
+							continue;
+						}
+						if (upper.startsWith("AUTH")) {
+							try {
+								String[] t = trimmed.split("\\s+");
+								int keyNo = Integer.decode(t[1]);
+								String keyHex = t[2].replaceAll("[^0-9A-Fa-f]", "");
+								byte[] key = hexToBytes(keyHex);
+								boolean ok = desfire.authenticate(key, (byte) keyNo,
+										com.github.skjolber.desfire.ev1.model.key.DesfireKeyType.AES);
+								sb.append(">> AUTH key").append(keyNo).append(" AES ").append(keyHex).append("\n");
+								sb.append("<< ").append(ok ? "AUTH SUCCESS" : "AUTH FAIL").append("\n\n");
+							} catch (Exception e) {
+								sb.append(">> ").append(trimmed).append("\n<< ERREUR: ").append(e.getMessage())
+										.append(" (format: AUTH <keyno> <32 hex>)\n\n");
+							}
+							continue;
+						}
+						if (upper.startsWith("READ")) {
+							try {
+								String[] t = trimmed.split("\\s+");
+								int fileNo = Integer.decode(t[1]);
+								int offset = Integer.decode(t[2]);
+								int length = Integer.decode(t[3]);
+								byte[] data = desfire.readData((byte) fileNo, offset, length);
+								sb.append(">> READ file").append(fileNo).append(" off").append(offset)
+										.append(" len").append(length).append("\n");
+								if (data != null) {
+									sb.append("<< ").append(Utils.getHexString(data, true)).append("\n");
+									sb.append("   ascii: ").append(toAscii(data)).append("\n\n");
+								} else {
+									sb.append("<< (null / refuse - authentifie-toi avec la bonne cle d'abord)\n\n");
+								}
+							} catch (Exception e) {
+								sb.append(">> ").append(trimmed).append("\n<< ERREUR: ").append(e.getMessage())
+										.append(" (format: READ <fileno> <offset> <length>)\n\n");
+							}
+							continue;
+						}
+
+						// ----- Raw APDU -----
+						String clean = trimmed.replaceAll("\\s", "");
 						if (!clean.matches("[0-9A-Fa-f]+")) {
-							sb.append(">> ").append(line.trim()).append("\n");
+							sb.append(">> ").append(trimmed).append("\n");
 							sb.append("<< ERREUR: caracteres non-hex (commentaire ? prefixe la ligne par #)\n\n");
 							continue;
 						}
 						if (clean.length() % 2 != 0) {
-							sb.append(">> ").append(line.trim()).append("\n");
+							sb.append(">> ").append(trimmed).append("\n");
 							sb.append("<< ERREUR: nombre impair de caracteres hex\n\n");
 							continue;
 						}
@@ -562,6 +623,15 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 					+ Character.digit(s.charAt(i + 1), 16));
 		}
 		return data;
+	}
+
+	private static String toAscii(byte[] data) {
+		StringBuilder s = new StringBuilder();
+		for (byte b : data) {
+			int c = b & 0xFF;
+			s.append((c >= 32 && c < 127) ? (char) c : '.');
+		}
+		return s.toString();
 	}
 
 	private void showMainFragment() {
