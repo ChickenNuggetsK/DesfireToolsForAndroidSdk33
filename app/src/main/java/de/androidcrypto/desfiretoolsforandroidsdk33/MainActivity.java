@@ -112,6 +112,7 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 	// Black-screen (AMOLED fake-sleep) mode
 	private android.view.View blackOverlay;
 	private boolean blackScreenEnabled;
+	private String pendingResult; // result deferred while the screen is black
 	
 	protected AlertDialog alertDialog;
 	
@@ -643,10 +644,13 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 	}
 
 	private void showScriptResult(String result) {
-		// operation finished: let the phone sleep again (unless black-screen mode is holding it)
-		if (!blackScreenEnabled) {
-			getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+		if (blackScreenEnabled) {
+			// defer the result window until the user wakes the screen
+			pendingResult = result;
+			return;
 		}
+		// operation finished: let the phone sleep again
+		getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 		final android.widget.TextView tv = new android.widget.TextView(this);
 		tv.setText(result.length() == 0 ? "(aucune sortie)" : result);
 		tv.setTypeface(android.graphics.Typeface.MONOSPACE);
@@ -741,6 +745,11 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 		lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
 		getWindow().setAttributes(lp);
 		blackScreenEnabled = false;
+		if (pendingResult != null) {
+			String r = pendingResult;
+			pendingResult = null;
+			showScriptResult(r);
+		}
 	}
 
 	// ----- Dictionary attack -----
