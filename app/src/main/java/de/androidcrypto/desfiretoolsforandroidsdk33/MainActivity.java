@@ -481,9 +481,24 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 				try {
 					DefaultIsoDepWrapper wrapper = (DefaultIsoDepWrapper) tag.getIo().getIsoDepWrapper();
 					String[] lines = script.split("\n");
-					for (String line : lines) {
-						String clean = line.replaceAll("[^0-9A-Fa-f]", "");
+					for (String rawLine : lines) {
+						String line = rawLine;
+						// strip comments (# or // , full line or inline)
+						int hash = line.indexOf('#');
+						if (hash >= 0) {
+							line = line.substring(0, hash);
+						}
+						int dslash = line.indexOf("//");
+						if (dslash >= 0) {
+							line = line.substring(0, dslash);
+						}
+						String clean = line.replaceAll("\\s", "");
 						if (clean.length() == 0) {
+							continue;
+						}
+						if (!clean.matches("[0-9A-Fa-f]+")) {
+							sb.append(">> ").append(line.trim()).append("\n");
+							sb.append("<< ERREUR: caracteres non-hex (commentaire ? prefixe la ligne par #)\n\n");
 							continue;
 						}
 						if (clean.length() % 2 != 0) {
