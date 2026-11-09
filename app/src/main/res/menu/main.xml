@@ -17,6 +17,9 @@
     <item android:id="@+id/action_script"
         android:title="Run Script"
         app:showAsAction="never" />
+    <item android:id="@+id/action_dict"
+        android:title="Dict Attack"
+        app:showAsAction="never" />
 
 
 </menu>

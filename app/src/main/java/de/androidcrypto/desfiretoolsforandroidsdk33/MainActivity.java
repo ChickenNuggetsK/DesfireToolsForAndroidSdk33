@@ -101,6 +101,10 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 	private MifareTag tag;
 	private DesfireTag desfireTag;
 	private DefaultIsoDepAdapter defaultIsoDepAdapter;
+
+	// Dictionary attack
+	private static final int REQ_PICK_DIC = 0xD1C;
+	private java.util.List<byte[]> dictKeys;
 	
 	protected AlertDialog alertDialog;
 	
@@ -662,6 +666,162 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 		return s.toString();
 	}
 
+	// ----- Dictionary attack -----
+
+	private void pickDictionaryFile() {
+		Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+		intent.addCategory(Intent.CATEGORY_OPENABLE);
+		intent.setType("*/*");
+		try {
+			startActivityForResult(intent, REQ_PICK_DIC);
+		} catch (Exception e) {
+			Toast.makeText(this, "Aucun gestionnaire de fichiers", Toast.LENGTH_SHORT).show();
+		}
+	}
+
+	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		super.onActivityResult(requestCode, resultCode, data);
+		if (requestCode == REQ_PICK_DIC && resultCode == RESULT_OK
+				&& data != null && data.getData() != null) {
+			loadDictionary(data.getData());
+		}
+	}
+
+	private void loadDictionary(android.net.Uri uri) {
+		java.util.List<byte[]> keys = new java.util.ArrayList<byte[]>();
+		int skipped = 0;
+		try {
+			java.io.BufferedReader br = new java.io.BufferedReader(
+					new java.io.InputStreamReader(getContentResolver().openInputStream(uri)));
+			String line;
+			while ((line = br.readLine()) != null) {
+				int h = line.indexOf('#');
+				if (h >= 0) {
+					line = line.substring(0, h);
+				}
+				String clean = line.replaceAll("[^0-9A-Fa-f]", "");
+				if (clean.length() == 0) {
+					continue;
+				}
+				if (clean.length() == 32) {
+					keys.add(hexToBytes(clean));
+				} else {
+					skipped++;
+				}
+			}
+			br.close();
+		} catch (Exception e) {
+			Toast.makeText(this, "Erreur lecture: " + e.getMessage(), Toast.LENGTH_LONG).show();
+			return;
+		}
+		dictKeys = keys;
+		showDictRunDialog(keys.size(), skipped);
+	}
+
+	private void showDictRunDialog(final int count, int skipped) {
+		android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+		layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+		layout.setPadding(40, 20, 40, 0);
+		android.widget.TextView info = new android.widget.TextView(this);
+		info.setText(count + " cles AES chargees"
+				+ (skipped > 0 ? " (" + skipped + " lignes ignorees)" : "")
+				+ "\nPose la carte, puis Lancer.");
+		final android.widget.EditText aidInput = new android.widget.EditText(this);
+		aidInput.setHint("AID (ex: 010000)");
+		aidInput.setText("010000");
+		final android.widget.EditText keyInput = new android.widget.EditText(this);
+		keyInput.setHint("Key number (ex: 1)");
+		keyInput.setText("1");
+		layout.addView(info);
+		layout.addView(aidInput);
+		layout.addView(keyInput);
+
+		AlertDialog.Builder b = new AlertDialog.Builder(this);
+		b.setTitle("Dictionnaire AES");
+		b.setView(layout);
+		b.setPositiveButton("Lancer", null);
+		b.setNegativeButton("Annuler", null);
+		final AlertDialog dialog = b.create();
+		dialog.show();
+		dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				if (count == 0) {
+					Toast.makeText(MainActivity.this, "Aucune cle valide dans le fichier", Toast.LENGTH_SHORT).show();
+					return;
+				}
+				byte[] aid;
+				int keyNo;
+				try {
+					aid = hexToBytes(aidInput.getText().toString().replaceAll("\\s", ""));
+					keyNo = Integer.decode(keyInput.getText().toString().trim());
+				} catch (Exception e) {
+					Toast.makeText(MainActivity.this, "AID ou key number invalide", Toast.LENGTH_SHORT).show();
+					return;
+				}
+				if (!isConnected()) {
+					Toast.makeText(MainActivity.this, "Pose une carte sur le telephone d'abord", Toast.LENGTH_SHORT).show();
+					return;
+				}
+				dialog.dismiss();
+				runDictAttack(aid, (byte) keyNo);
+			}
+		});
+	}
+
+	private void runDictAttack(final byte[] aid, final byte keyNo) {
+		final java.util.List<byte[]> keys = dictKeys;
+		Toast.makeText(this, "Test de " + keys.size() + " cles...", Toast.LENGTH_SHORT).show();
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				final StringBuilder sb = new StringBuilder();
+				byte[] found = null;
+				int tried = 0;
+				try {
+					com.github.skjolber.desfire.nfcjlib.core.DESFireEV1 desfire =
+							new com.github.skjolber.desfire.nfcjlib.core.DESFireEV1();
+					desfire.setAdapter(defaultIsoDepAdapter);
+					for (byte[] key : keys) {
+						tried++;
+						try {
+							desfire.selectApplication(aid);
+							if (desfire.authenticate(key, keyNo,
+									com.github.skjolber.desfire.ev1.model.key.DesfireKeyType.AES)) {
+								found = key;
+								break;
+							}
+						} catch (Exception e) {
+							if (!isConnected()) {
+								sb.append("Carte perdue apres ").append(tried).append(" essais.\n");
+								break;
+							}
+						}
+					}
+				} catch (Exception e) {
+					sb.append("ERREUR: ").append(e.getMessage()).append("\n");
+				}
+				final byte[] foundF = found;
+				final int triedF = tried;
+				runOnUiThread(new Runnable() {
+					@Override
+					public void run() {
+						if (foundF != null) {
+							sb.append("=== CLE TROUVEE (key").append(keyNo).append(") ===\n");
+							sb.append(Utils.getHexString(foundF, true)).append("\n");
+							sb.append("(apres ").append(triedF).append(" essais)\n");
+						} else {
+							sb.append("Aucune des ").append(keys.size())
+									.append(" cles n'a fonctionne sur key").append(keyNo).append(".\n");
+						}
+						showScriptResult(sb.toString());
+					}
+				});
+			}
+		}).start();
+	}
+
 	private void showMainFragment() {
 		Log.d(TAG, "showMainFragment");
 
@@ -886,10 +1046,14 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 			menu.getItem(i).setVisible(false);
 		}
 
-		// Script runner: always available
+		// Script runner + dictionary: always available
 		MenuItem script = menu.findItem(R.id.action_script);
 		if(script != null) {
 			script.setVisible(true);
+		}
+		MenuItem dict = menu.findItem(R.id.action_dict);
+		if(dict != null) {
+			dict.setVisible(true);
 		}
 
 		MenuItem keys = menu.findItem(R.id.action_settings);
@@ -940,6 +1104,9 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 			return true;
 		} else if (item.getItemId() == R.id.action_script) {
 			showScriptRunner();
+			return true;
+		} else if (item.getItemId() == R.id.action_dict) {
+			pickDictionaryFile();
 			return true;
 		} else {
 			return super.onOptionsItemSelected(item);
