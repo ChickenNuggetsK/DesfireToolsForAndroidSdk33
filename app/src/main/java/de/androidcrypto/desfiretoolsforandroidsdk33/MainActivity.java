@@ -822,6 +822,158 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 		}).start();
 	}
 
+	// ----- Dump + Restore (read a protected file via the Change key, then put settings back) -----
+
+	private void showDumpRestoreDialog() {
+		android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+		layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+		layout.setPadding(40, 20, 40, 0);
+		final android.widget.EditText aidInput = new android.widget.EditText(this);
+		aidInput.setHint("AID (ex: 010000)");
+		aidInput.setText("010000");
+		final android.widget.EditText fileInput = new android.widget.EditText(this);
+		fileInput.setHint("File number (ex: 1)");
+		fileInput.setText("1");
+		final android.widget.EditText keyNoInput = new android.widget.EditText(this);
+		keyNoInput.setHint("Change key number (ex: 0)");
+		keyNoInput.setText("0");
+		final android.widget.EditText keyInput = new android.widget.EditText(this);
+		keyInput.setHint("Change key (32 hex)");
+		keyInput.setText("00000000000000000000000000000000");
+		layout.addView(aidInput);
+		layout.addView(fileInput);
+		layout.addView(keyNoInput);
+		layout.addView(keyInput);
+
+		AlertDialog.Builder b = new AlertDialog.Builder(this);
+		b.setTitle("Dump + Restore");
+		b.setView(layout);
+		b.setPositiveButton("Lancer", null);
+		b.setNegativeButton("Annuler", null);
+		final AlertDialog dialog = b.create();
+		dialog.show();
+		dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				byte[] aid;
+				int fileNo;
+				int keyNo;
+				byte[] key;
+				try {
+					aid = hexToBytes(aidInput.getText().toString().replaceAll("\\s", ""));
+					fileNo = Integer.decode(fileInput.getText().toString().trim());
+					keyNo = Integer.decode(keyNoInput.getText().toString().trim());
+					key = hexToBytes(keyInput.getText().toString().replaceAll("[^0-9A-Fa-f]", ""));
+				} catch (Exception e) {
+					Toast.makeText(MainActivity.this, "Parametres invalides", Toast.LENGTH_SHORT).show();
+					return;
+				}
+				if (!isConnected()) {
+					Toast.makeText(MainActivity.this, "Pose une carte sur le telephone d'abord", Toast.LENGTH_SHORT).show();
+					return;
+				}
+				dialog.dismiss();
+				runDumpRestore(aid, fileNo, (byte) keyNo, key);
+			}
+		});
+	}
+
+	private void runDumpRestore(final byte[] aid, final int fileNo, final byte changeKeyNo, final byte[] changeKey) {
+		Toast.makeText(this, "Dump + Restore en cours...", Toast.LENGTH_SHORT).show();
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				final StringBuilder sb = new StringBuilder();
+				boolean opened = false;
+				byte origComm = 0, origAr1 = 0, origAr2 = 0;
+				try {
+					DefaultIsoDepWrapper w = (DefaultIsoDepWrapper) tag.getIo().getIsoDepWrapper();
+					com.github.skjolber.desfire.nfcjlib.core.DESFireEV1 desfire =
+							new com.github.skjolber.desfire.nfcjlib.core.DESFireEV1();
+					desfire.setAdapter(defaultIsoDepAdapter);
+
+					byte[] sel = new byte[]{(byte) 0x90, 0x5A, 0, 0, 0x03, aid[0], aid[1], aid[2], 0};
+					w.transceive(sel);
+					byte[] gfs = w.transceive(new byte[]{(byte) 0x90, (byte) 0xF5, 0, 0, 0x01, (byte) fileNo, 0});
+
+					if (gfs.length < 9 || (gfs[gfs.length - 2] & 0xFF) != 0x91 || (gfs[gfs.length - 1] & 0xFF) != 0x00) {
+						sb.append("GetFileSettings a echoue (").append(Utils.getHexString(gfs, true)).append("). Abandon, carte intacte.\n");
+					} else {
+						origComm = gfs[1];
+						origAr1 = gfs[2];
+						origAr2 = gfs[3];
+						int size = (gfs[4] & 0xFF) | ((gfs[5] & 0xFF) << 8) | ((gfs[6] & 0xFF) << 16);
+						sb.append("Config d'origine: comm=").append(String.format("%02X", origComm & 0xFF))
+								.append(" ar=").append(String.format("%02X%02X", origAr1 & 0xFF, origAr2 & 0xFF))
+								.append(" taille=").append(size).append(" octets\n\n");
+
+						desfire.selectApplication(aid);
+						if (!desfire.authenticate(changeKey, changeKeyNo,
+								com.github.skjolber.desfire.ev1.model.key.DesfireKeyType.AES)) {
+							sb.append("AUTH cle Change (key").append(changeKeyNo & 0xFF)
+									.append(") echouee. Abandon, carte intacte.\n");
+						} else {
+							byte newAr1 = origAr1;
+							byte newAr2 = (byte) (0xE0 | (origAr2 & 0x0F)); // Read = libre
+							if (!desfire.changeFileSettings((byte) fileNo, (byte) 0x00, newAr1, newAr2)) {
+								sb.append("Ouverture (ChangeFileSettings) echouee. Carte intacte.\n");
+							} else {
+								opened = true;
+								w.transceive(sel); // fresh select, lecture libre maintenant
+								byte[] rd = new byte[]{(byte) 0x90, (byte) 0xBD, 0, 0, 0x07, (byte) fileNo, 0, 0, 0,
+										(byte) (size & 0xFF), (byte) ((size >> 8) & 0xFF), (byte) ((size >> 16) & 0xFF), 0};
+								byte[] content = w.transceive(rd);
+								if (content.length >= 2 && (content[content.length - 2] & 0xFF) == 0x91
+										&& (content[content.length - 1] & 0xFF) == 0x00) {
+									byte[] payload = java.util.Arrays.copyOf(content, content.length - 2);
+									sb.append(">>> CONTENU: ").append(Utils.getHexString(payload, true)).append("\n");
+									sb.append("    ascii: ").append(toAscii(payload)).append("\n\n");
+								} else {
+									sb.append("Lecture: reponse inattendue ").append(Utils.getHexString(content, true)).append("\n\n");
+								}
+							}
+						}
+					}
+				} catch (Exception e) {
+					sb.append("ERREUR phase dump: ").append(e.getMessage()).append("\n");
+				}
+
+				// ---- RESTORE (seulement si on a ouvert) ----
+				if (opened) {
+					try {
+						DefaultIsoDepWrapper w2 = (DefaultIsoDepWrapper) tag.getIo().getIsoDepWrapper();
+						com.github.skjolber.desfire.nfcjlib.core.DESFireEV1 d2 =
+								new com.github.skjolber.desfire.nfcjlib.core.DESFireEV1();
+						d2.setAdapter(defaultIsoDepAdapter);
+						d2.selectApplication(aid);
+						boolean ra = d2.authenticate(changeKey, changeKeyNo,
+								com.github.skjolber.desfire.ev1.model.key.DesfireKeyType.AES);
+						boolean rs = ra && d2.changeFileSettings((byte) fileNo, origComm, origAr1, origAr2);
+						w2.transceive(new byte[]{(byte) 0x90, 0x5A, 0, 0, 0x03, aid[0], aid[1], aid[2], 0});
+						byte[] chk = w2.transceive(new byte[]{(byte) 0x90, (byte) 0xF5, 0, 0, 0x01, (byte) fileNo, 0});
+						boolean ok = chk.length >= 4 && chk[1] == origComm && chk[2] == origAr1 && chk[3] == origAr2;
+						if (rs && ok) {
+							sb.append("RESTAURATION OK — carte identique a l'origine (verifie).\n");
+						} else {
+							sb.append("!!! RESTAURATION INCOMPLETE (auth=").append(ra).append(" chg=").append(rs)
+									.append(" verif=").append(ok).append("). Fichier peut-etre laisse OUVERT.\n");
+						}
+					} catch (Exception e) {
+						sb.append("!!! ERREUR RESTAURATION: ").append(e.getMessage())
+								.append(" — fichier peut-etre laisse OUVERT, restaure a la main !\n");
+					}
+				}
+
+				runOnUiThread(new Runnable() {
+					@Override
+					public void run() {
+						showScriptResult(sb.toString());
+					}
+				});
+			}
+		}).start();
+	}
+
 	private void showMainFragment() {
 		Log.d(TAG, "showMainFragment");
 
@@ -1055,6 +1207,10 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 		if(dict != null) {
 			dict.setVisible(true);
 		}
+		MenuItem dump = menu.findItem(R.id.action_dump);
+		if(dump != null) {
+			dump.setVisible(true);
+		}
 
 		MenuItem keys = menu.findItem(R.id.action_settings);
 		MenuItem addKey = menu.findItem(R.id.action_add);
@@ -1107,6 +1263,9 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 			return true;
 		} else if (item.getItemId() == R.id.action_dict) {
 			pickDictionaryFile();
+			return true;
+		} else if (item.getItemId() == R.id.action_dump) {
+			showDumpRestoreDialog();
 			return true;
 		} else {
 			return super.onOptionsItemSelected(item);
