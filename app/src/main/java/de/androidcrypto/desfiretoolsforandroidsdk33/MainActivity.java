@@ -555,6 +555,25 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 							continue;
 						}
 
+						if (upper.startsWith("CHFILESETTINGS")) {
+							try {
+								String[] t = trimmed.split("\\s+");
+								int fileNo = Integer.decode(t[1]);
+								int comm = Integer.parseInt(t[2], 16);
+								int ar1 = Integer.parseInt(t[3], 16);
+								int ar2 = Integer.parseInt(t[4], 16);
+								boolean ok = desfire.changeFileSettings((byte) fileNo, (byte) comm,
+										(byte) ar1, (byte) ar2);
+								sb.append(">> CHFILESETTINGS file").append(fileNo)
+										.append(" comm=").append(t[2]).append(" ar=").append(t[3]).append(t[4]).append("\n");
+								sb.append("<< ").append(ok ? "OK" : "ECHEC (authentifie-toi avec la cle Change d'abord)").append("\n\n");
+							} catch (Exception e) {
+								sb.append(">> ").append(trimmed).append("\n<< ERREUR: ").append(e.getMessage())
+										.append(" (format: CHFILESETTINGS <fileno> <comm> <ar1> <ar2>, en hex)\n\n");
+							}
+							continue;
+						}
+
 						// ----- Raw APDU -----
 						String clean = trimmed.replaceAll("\\s", "");
 						if (!clean.matches("[0-9A-Fa-f]+")) {
