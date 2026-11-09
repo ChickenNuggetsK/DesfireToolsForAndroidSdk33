@@ -773,6 +773,12 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 			menu.getItem(i).setVisible(false);
 		}
 
+		// Script runner: always available
+		MenuItem script = menu.findItem(R.id.action_script);
+		if(script != null) {
+			script.setVisible(true);
+		}
+
 		MenuItem keys = menu.findItem(R.id.action_settings);
 		MenuItem addKey = menu.findItem(R.id.action_add);
 		MenuItem save = menu.findItem(R.id.action_save);
