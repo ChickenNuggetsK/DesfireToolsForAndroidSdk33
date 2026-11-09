@@ -486,6 +486,7 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 					desfire.setAdapter(defaultIsoDepAdapter);
 
 					String[] lines = script.split("\n");
+					byte[] lastAid = null; // remembered for auto re-select before each AUTH (dictionary mode)
 					for (String rawLine : lines) {
 						String line = rawLine;
 						// strip comments (# or // , full line or inline)
@@ -509,6 +510,9 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 								String aidHex = trimmed.substring(6).replaceAll("\\s", "");
 								byte[] aid = hexToBytes(aidHex);
 								boolean ok = desfire.selectApplication(aid);
+								if (ok) {
+									lastAid = aid;
+								}
 								sb.append(">> SELECT ").append(aidHex).append("\n");
 								sb.append("<< ").append(ok ? "OK" : "ECHEC (AID introuvable ?)").append("\n\n");
 							} catch (Exception e) {
@@ -523,6 +527,11 @@ public class MainActivity extends Activity implements ReaderCallback, FragmentMa
 								int keyNo = Integer.decode(t[1]);
 								String keyHex = t[2].replaceAll("[^0-9A-Fa-f]", "");
 								byte[] key = hexToBytes(keyHex);
+								// auto re-select before each attempt so a prior failed AUTH
+								// doesn't poison the next one (practical dictionary mode)
+								if (lastAid != null) {
+									desfire.selectApplication(lastAid);
+								}
 								boolean ok = desfire.authenticate(key, (byte) keyNo,
 										com.github.skjolber.desfire.ev1.model.key.DesfireKeyType.AES);
 								sb.append(">> AUTH key").append(keyNo).append(" AES ").append(keyHex).append("\n");
