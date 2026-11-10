@@ -50,4 +50,5 @@ jobs:
           - Ecran noir: optional AMOLED fake-sleep that keeps NFC alive
           - Armed actions, screen kept on, silent scan (no beep/vibration), MIUI stale-tag crash fix
 
-          Debug-signed APK; install over any previous build. Educational use on your own cards only."
+          Debug-signed APK; install over any previous build. Educational use on your own cards only." \
+          || gh release upload "${GITHUB_REF_NAME}" "MifareDesfireTool-${GITHUB_REF_NAME}.apk" --clobber
