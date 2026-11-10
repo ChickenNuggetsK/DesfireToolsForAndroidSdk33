@@ -1,6 +1,50 @@
 # desfire-tools-for-android
 A collection of tools for interaction with [MIFARE DESFire EV1] NFC tags using Android, mostly adapted from [libfreefare] and [nfcjlib].
 
+## Fork additions (ChickenNuggetsK) — NFC analysis toolkit
+
+This fork turns the demo app into a small hands-on DESFire analysis toolkit. All features
+were added on top of the MichaelsPlayground / SDK 33 fork and are reachable from the overflow
+menu (⋮). The app uses NFC **reader mode**, so it behaves well on Xiaomi/MIUI where the system
+otherwise steals the tag.
+
+### Features added
+
+- **Run Script** — paste commands, one per line (`#` and `//` comments ignored):
+  - raw ISO 7816 / DESFire APDUs in hex, e.g. `90 6A 00 00 00`;
+  - high-level commands backed by the embedded [nfcjlib] crypto session:
+    - `SELECT <aid>` — select an application (3-byte AID, LSB first, e.g. `SELECT 01 00 00`)
+    - `AUTH <keyno> <32 hex>` — AES mutual authentication
+    - `READ <fileno> <offset> <length>` — read a file via the authenticated session
+    - `CHFILESETTINGS <fileno> <comm> <ar1> <ar2>` — change a file's comm mode / access rights
+  - responses are shown in a scrollable, copyable dialog (hex + ASCII).
+- **Dict Attack** — pick a `.dic` wordlist (one AES key per line, 32 hex, `#` comments) and
+  brute-force it against a chosen AID + key number; re-selects before each attempt and stops on
+  success. Proxmark `mfdes_default_keys.dic` works (non-AES lines are skipped).
+- **Dump + Restore** — reads a file's original settings, authenticates the Change key
+  (default key configurable), opens read access, dumps the content, then restores the exact
+  original settings and **verifies** the card is back to its initial state. Aborts untouched if
+  authentication fails.
+- **Ecran noir** — optional AMOLED "fake sleep": a full black overlay at minimum brightness
+  while the screen stays on (so NFC keeps working). Tap to wake.
+- **Armed actions** — the three tools above can be launched with no card present: they arm and
+  fire automatically when a tag is tapped. The screen is kept on while armed/running, and a
+  result produced during black-screen mode is deferred until you wake the screen.
+- **Silent scanning** — `FLAG_READER_NO_PLATFORM_SOUNDS` disables the platform scan beep/vibration.
+- **Crash fix** — a stale-tag `SecurityException` (common on MIUI) in the tag-presence scanner is
+  now caught instead of crashing the app.
+
+### Build & install
+
+Builds run on GitHub Actions (`.github/workflows/build.yml`, JDK 17 / Gradle 8 / AGP 8). The
+signed-with-debug-key APK is available:
+
+- from the **Releases** page (attached `app-debug.apk`), or
+- from any green **Actions** run → *Artifacts* → `desfire-tool-apk`.
+
+Install it over any previous build (same debug signature). This is a personal, educational fork —
+use it only on cards you own.
+
 ## Notes from MichaelsPlayground & AndroidCrypto
 
 Note: This repository was forked from the original source available at:
